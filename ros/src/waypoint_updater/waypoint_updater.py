@@ -137,7 +137,7 @@ class WaypointUpdater(object):
                 else:
                     i_point_target_velocity = -10.0     # negative stops car 'creep' when stopped
                 print(i_point_target_velocity, distance_to_stop_line[0], start_point_velocity)
-                self.set_waypoint_velocity(self.waypoints, i, i_point_target_velocity)
+                self.set_waypoint_velocity(self.waypoints, closest_wp_idx + i, i_point_target_velocity)
         else:
             # just set the following waypoints to reference velocity
             # speed controllers will sort out how to get to this desired velocity
@@ -145,7 +145,7 @@ class WaypointUpdater(object):
                 if i < len(self.waypoints):
                     self.set_waypoint_velocity(self.waypoints, i, 5.0)
 
-                    # now publish the waypoints - refactored from pose_cb
+        # now publish the waypoints
         # get waypoints ahead of the car
         # this currently sends as many as are available
         # should this fail if there aren't enough waypoints and just wait until there area enough?
