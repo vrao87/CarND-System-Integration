@@ -26,7 +26,8 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 LOOKAHEAD_WPS = 100 # Number of waypoints we will publish. You can change this number
 MAX_DECEL = 5.0
 COMF_DECEL = 2.5
-STOP_LINE_OFFSET = 3
+STOP_LINE_OFFSET = 3.5
+STOP_INDEX_OFFSET = 3
 MIN_VELOCITY = 5.0
 
 DRIVE_STATE_INIT = 0
@@ -71,20 +72,21 @@ class WaypointUpdater(object):
 
             rate.sleep()
 
-    def drive_state_machine(self, closest_waypoint):
-        farthest_wp_idx = closest_waypoint + LOOKAHEAD_WPS
-        if self.closest_waypoint > 0:
-            self.stop_idx = self.get_stop_idx(closest_waypoint)
-            self.next_waypoints = self.waypoints[closest_waypoint : farthest_wp_idx]
+    def drive_state_machine(self, closest_waypoint_idx):
+        farthest_wp_idx = closest_waypoint_idx + LOOKAHEAD_WPS
+        if closest_waypoint_idx > 0:
+            self.stop_idx = self.get_stop_idx(closest_waypoint_idx)
+            self.next_waypoints = self.waypoints[closest_waypoint_idx : farthest_wp_idx]
 
             if self.stop_idx > 0:
                 # waypoints_up_to_stop = self.next_waypoints[:self.stop_idx]
                 # red light ahead, near or far
-                distance_to_stop_line = self.distances_to_end(self.waypoints[closest_waypoint : self.stop_idx])
+                distance_to_stop_line = self.distances_to_end(self.waypoints[closest_waypoint_idx : self.stop_idx])
                 comfort_stopping_distance = (self.current_velocity * self.current_velocity)
                 comfort_stopping_distance = comfort_stopping_distance / COMF_DECEL
                 minimum_stop_distance = self.current_velocity * self.current_velocity
                 minimum_stop_distance = minimum_stop_distance / MAX_DECEL
+                print(distance_to_stop_line[0])
                 if (distance_to_stop_line[0] - STOP_LINE_OFFSET) < comfort_stopping_distance:
                     if self.driving_state == DRIVE_STATE_DRIVING and \
                             (distance_to_stop_line[0] - STOP_LINE_OFFSET) < minimum_stop_distance:
@@ -119,20 +121,22 @@ class WaypointUpdater(object):
     def publish_waypoints(self, closest_wp_idx):
         start_point_velocity = self.get_waypoint_velocity(self.waypoints[closest_wp_idx])
         distance_to_stop_line = self.distances_to_end(self.waypoints[closest_wp_idx : self.stop_idx])
-        # print(distance_to_stop_line[0], distance_to_stop_line[1])
-        if self.driving_state == DRIVE_STATE_STOPPING:
+
+        if self.driving_state == DRIVE_STATE_STOPPING and closest_wp_idx < self.stop_idx:
             # smoothly stop over the waypoints up to next_red_light waypoint
             # setting desired velocity at each
-            for i in range(closest_wp_idx, self.stop_idx + 1):
+            print(closest_wp_idx, self.stop_idx)
+            for i in range(0, (abs(closest_wp_idx - self.stop_idx))):
                 # get the distance to the i-th way point
                 # i_point_distance = self.distances_to_end(self.waypoints, self.closest_waypoint, i)
-                if (distance_to_stop_line[0] - STOP_LINE_OFFSET) > 0:
+                if (distance_to_stop_line[0]) > 0.1:
                     i_point_target_velocity = distance_to_stop_line[i]/distance_to_stop_line[0]
                     i_point_target_velocity = (start_point_velocity * i_point_target_velocity)
 
                     # i_point_target_velocity += start_point_velocity
                 else:
                     i_point_target_velocity = -10.0     # negative stops car 'creep' when stopped
+                print(i_point_target_velocity, distance_to_stop_line[0], start_point_velocity)
                 self.set_waypoint_velocity(self.waypoints, i, i_point_target_velocity)
         else:
             # just set the following waypoints to reference velocity
@@ -170,7 +174,7 @@ class WaypointUpdater(object):
             stop_idx = -1
         else:
             # Stop 2 waypoints before closest waypoint to the traffic light
-            stop_idx = max(self.traffic_wp_idx - closest_wp_idx - STOP_LINE_OFFSET, 0)
+            stop_idx = max(self.traffic_wp_idx - 3, 0)
 
         return stop_idx
 
@@ -249,7 +253,7 @@ class WaypointUpdater(object):
         dists_reversed = [0]
 
         for i in range(len_wps - 1):
-            wp_idx = len_wps - STOP_LINE_OFFSET - i
+            wp_idx = len_wps - STOP_INDEX_OFFSET - i
 
             incremental_dist = dl(
                 waypoints[wp_idx].pose.pose.position,
@@ -281,12 +285,8 @@ class WaypointUpdater(object):
         # Set velocity for a given waypoint in the list of waypoints
 
         waypoints[waypoint].twist.twist.linear.x = velocity
+
     def current_velocity_cb(self, msg):
-        """
-        Callback function to store the car current velocity
-        :param msg:
-        :return:
-        """
         # store the current velocity TwistStamped message
         self.current_velocity = msg.twist.linear.x
 
