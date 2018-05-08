@@ -97,7 +97,7 @@ class WaypointUpdater(object):
             threshold. Otherwise keep going in order to not end up being stopped in the middle of the junction.
 
         """
-        farthest_wp_idx = self.closest_wp_idx + LOOKAHEAD_WPS
+
         if self.closest_wp_idx > 0:
             self.stop_idx = self.get_stop_idx(self.closest_wp_idx)
             if self.stop_idx > 0:
@@ -115,29 +115,29 @@ class WaypointUpdater(object):
                         if self.current_velocity < MIN_VELOCITY and \
                                 distance_to_stop_line[0] > STOP_LINE_OFFSET:
                             # Possible to stop
-                            # rospy.loginfo(" Emergency stop ")
+                            rospy.loginfo(" Emergency stop ")
                             self.driving_state = DRIVE_STATE_STOPPING
                         else:
-                            # rospy.loginfo("Ignoring late red light")
+                            rospy.loginfo("Ignoring late red light")
                             self.driving_state = DRIVE_STATE_DRIVING
                     else:
                         # should slow down and stop now
-                        # if self.driving_state != DRIVE_STATE_STOPPING:
-                        #    rospy.loginfo("Changing to STOPPING state")
+                        if self.driving_state != DRIVE_STATE_STOPPING:
+                           rospy.loginfo("Changing to STOPPING state")
                         self.driving_state = DRIVE_STATE_STOPPING
                 else:
                     if self.driving_state == DRIVE_STATE_STOPPING:
                         # we are already stopping, stay in this state if the light is still red
                         self.driving_state = DRIVE_STATE_STOPPING
-                        # rospy.loginfo("Holding STOPPING state")
+                        rospy.loginfo("Holding STOPPING state")
                     else:
-                        # if self.driving_state != DRIVE_STATE_DRIVING:
-                        #   rospy.loginfo("Changing to DRIVING state")
+                        if self.driving_state != DRIVE_STATE_DRIVING:
+                            rospy.loginfo("Changing to DRIVING state")
                         self.driving_state = DRIVE_STATE_DRIVING
             else:
                 # no red light
-                # if self.driving_state != DRIVE_STATE_DRIVING:
-                #   rospy.loginfo("Changing to DRIVING state")
+                if self.driving_state != DRIVE_STATE_DRIVING:
+                    rospy.loginfo("Changing to DRIVING state")
                 self.driving_state = DRIVE_STATE_DRIVING
 
     def publish_waypoints(self):
@@ -145,7 +145,10 @@ class WaypointUpdater(object):
         start_point_velocity = self.get_waypoint_velocity(self.waypoints[closest_wp_idx])
         # get the distance from each waypoint till the stop line
         distance_to_stop_line = self.distances_to_end(self.waypoints[closest_wp_idx : self.stop_idx])
-
+        farthest_wp_idx = self.closest_wp_idx + LOOKAHEAD_WPS
+        lane = Lane()
+        waypoints_ahead = []
+        print(self.driving_state)
         if self.driving_state == DRIVE_STATE_STOPPING and closest_wp_idx < self.stop_idx:
             # Loop over the waypoints up to next_red_light waypoint
             # setting desired velocity at each waypoint as a ratio of remaining distance to stop
@@ -154,37 +157,45 @@ class WaypointUpdater(object):
             for i in range(0, (abs(closest_wp_idx - self.stop_idx))):
                 # get the distance to the i-th way point
                 # i_point_distance = self.distances_to_end(self.waypoints, self.closest_waypoint, i)
+                p = Waypoint()
+                p.pose = self.waypoints[closest_wp_idx + i].pose
+                p.twist = self.waypoints[closest_wp_idx + i].twist
                 if (distance_to_stop_line[0]) > STOP_LINE_OFFSET:
                     if self.current_velocity < 0.8:
                         i_point_target_velocity = -10.0
                     else:
                         i_point_target_velocity = distance_to_stop_line[i]/distance_to_stop_line[0]
                         i_point_target_velocity = (start_point_velocity * i_point_target_velocity)
-
                 else:
                     i_point_target_velocity = -10.0     # negative stops car 'creep' when stopped
-                self.set_waypoint_velocity(self.waypoints, closest_wp_idx + i, i_point_target_velocity)
-        else:
+                p.twist.twist.linear.x = i_point_target_velocity
+                waypoints_ahead.append(self.waypoints[closest_wp_idx + i])
+            for i in range(self.stop_idx, farthest_wp_idx):
+                waypoints_ahead.append(self.waypoints[i])
+            lane.waypoints = waypoints_ahead
+        elif self.driving_state == DRIVE_STATE_DRIVING:
             # Set the velocity to reference velocity if driving state is not stopping
-            for i in range(closest_wp_idx, closest_wp_idx + LOOKAHEAD_WPS):
-                if i < len(self.waypoints):
-                    self.set_waypoint_velocity(self.waypoints, i, self.reference_vel[i])
+            # print("in else")
+            lane.waypoints = self.waypoints[closest_wp_idx:farthest_wp_idx]
+            # print(lane.waypoints)
+        else:
+            pass
 
         # now publish the waypoints
         # get LOOKAHEAD_WPS number of waypoints ahead of the car
-        waypoints_ahead = []
-        n_waypoints = len(self.waypoints)  # can only get this many waypoints
-        if n_waypoints > LOOKAHEAD_WPS:
-            n_waypoints = LOOKAHEAD_WPS  # max waypoints to pass over
-        for i in range(n_waypoints):
-            # check that the waypoints we want are in the range of the waypoint array
-            if closest_wp_idx + i < len(self.waypoints):
-                waypoints_ahead.append(self.waypoints[closest_wp_idx + i])
+
+        # n_waypoints = len(self.waypoints)  # can only get this many waypoints
+        # if n_waypoints > LOOKAHEAD_WPS:
+        #     n_waypoints = LOOKAHEAD_WPS  # max waypoints to pass over
+        # for i in range(n_waypoints):
+        #     # check that the waypoints we want are in the range of the waypoint array
+        #     if closest_wp_idx + i < len(self.waypoints):
+        #         waypoints_ahead.append(self.waypoints[closest_wp_idx + i])
 
         # structure the data to match the expected styx_msgs/Lane form
-        lane = Lane()
-        lane.waypoints = waypoints_ahead  # list of waypoints ahead of the car
-        lane.header.stamp = rospy.Time(0)  # timestamp
+
+        # lane.waypoints = waypoints_ahead  # list of waypoints ahead of the car
+        # lane.header.stamp = rospy.Time(0)  # timestamp
 
         self.final_waypoints_pub.publish(lane)
 
@@ -253,6 +264,7 @@ class WaypointUpdater(object):
 
     def waypoints_cb(self, waypoints):
         self.waypoints = waypoints.waypoints
+
         if not self.waypoints_2d:
             self.waypoints_2d = [
                 [waypoint.pose.pose.position.x, waypoint.pose.pose.position.y]
